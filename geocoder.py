@@ -7,7 +7,7 @@ import pickle
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 import socket
 
-# Load your CSV
+# INPUT ADRESSES FILE
 df = pd.read_excel("D:/data_folders/work/Mobility/Newwoonadressen_uncoded.xlsx") ##change to location in your computer
 
 
