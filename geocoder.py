@@ -9,7 +9,7 @@ import socket
 
 # INPUT ADRESSES FILE
 df = pd.read_excel("D:/data_folders/work/Mobility/Newwoonadressen_uncoded.xlsx") ##change to location in your computer
-
+OUTPUT_FILE = "D:/data_folders/work/Mobility/newadressewoon2_coded.xlsx"
 
 USER_AGENTS = [
     "my_geocoder_app1",
@@ -22,7 +22,7 @@ USER_AGENTS = [
 # Cache file
 CACHE_FILE = "D:/data_folders/work/Mobility/geocode_cache.pkl"
 CHECKPOINT_FILE = "D:/data_folders/work/Mobility/checkpoint.pkl"
-OUTPUT_FILE = "D:/data_folders/work/Mobility/newadressewoon2_coded.xlsx"
+
 
 # Load existing cache if available
 if os.path.exists(CACHE_FILE):
