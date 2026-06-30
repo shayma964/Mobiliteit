@@ -1,3 +1,39 @@
+"""
+geocoder.py
+
+Purpose and pipeline overview
+-----------------------------
+This script geocodes addresses from an Excel file using the OpenStreetMap Nominatim
+geocoding service (via geopy). It is designed to be safe and resumable for large
+batches:
+
+1. Read input addresses from an Excel file (DataFrame).
+2. Use a persistent cache (pickle file) to avoid re-querying addresses already
+   geocoded in previous runs.
+3. Use a checkpoint (pickle file) to record progress (last processed row and cache)
+   so the job can be resumed after interruption.
+4. Split the address list into multiple chunks and use a different Nominatim
+   user_agent for each chunk to spread load across user agents.
+5. For each address:
+   - Check cache; if cached, use cached result.
+   - Build a full address string from address/city/country.
+   - Attempt geocoding with retry and exponential backoff in case of timeouts or
+     service errors.
+   - Cache both successful coordinates and explicit failures (None, None) to
+     avoid repeated failed requests.
+   - Save checkpoints and partial outputs periodically.
+6. After processing, combine chunks, restore original order, save final output,
+   and persist the cache.
+
+Notes and best practices
+- Respect Nominatim's usage policy: limit requests, include a proper contact
+  user_agent string if appropriate, and do not overload the service.
+- The script uses time.sleep to enforce a small delay between calls. Adjust
+  rate limiting and user agents responsibly.
+- Consider moving configuration (paths, user agents) out to a config file or
+  environment variables for portability.
+"""
+
 from geopy.geocoders import Nominatim
 import pandas as pd
 import time
@@ -8,6 +44,7 @@ from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 import socket
 
 # INPUT ADRESSES FILE
+# NOTE: adjust paths to those valid on your machine or make them configurable
 df = pd.read_excel("D:/data_folders/work/Mobility/Newwoonadressen_uncoded.xlsx") ##change to location in your computer
 OUTPUT_FILE = "D:/data_folders/work/Mobility/newadressewoon2_coded.xlsx"
 
@@ -45,9 +82,38 @@ if os.path.exists(CHECKPOINT_FILE):
 
 # Function to create geocoder with different user agent
 def get_geocoder(agent_index):
+    """
+    Return a geopy Nominatim geocoder instance with a user_agent chosen
+    from the USER_AGENTS list based on agent_index.
+
+    Parameters:
+    - agent_index (int): Index identifying which user agent to use. The index
+                         is modulo'd by the number of configured user agents.
+
+    Returns:
+    - Nominatim: A geolocator instance with the selected user_agent.
+    """
     return Nominatim(user_agent=USER_AGENTS[agent_index % len(USER_AGENTS)])
 
 def geocode_address(row, agent_index):
+    """
+    Geocode an address row with caching, retry, and exponential backoff.
+
+    Behavior:
+    - Build a canonical address key from address, city, country.
+    - If the key is in the cache, return the cached coordinates.
+    - Otherwise, attempt to geocode the constructed address string using a
+      Nominatim geocoder instance. Use up to `max_retries` attempts with
+      exponential backoff on expected transient exceptions.
+    - Cache both successful coordinate pairs and failures (None, None).
+
+    Parameters:
+    - row (pandas.Series): Row with at least 'address', 'city', 'country' fields.
+    - agent_index (int): Index to select which USER_AGENTS entry to use.
+
+    Returns:
+    - pandas.Series: Two-item Series [latitude, longitude], where either may be None.
+    """
     try:
         # Convert to string and handle potential NaN/None values
         address = str(row['address']).strip() if pd.notna(row['address']) else ""
@@ -99,6 +165,7 @@ def geocode_address(row, agent_index):
                     return pd.Series([None, None])
                     
             except (GeocoderTimedOut, GeocoderServiceError, socket.gaierror) as e:
+                # Transient errors: retry with exponential backoff
                 print(f"Attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
                     wait_time = (2 ** attempt) * 5  # Exponential backoff
@@ -110,6 +177,7 @@ def geocode_address(row, agent_index):
                     return pd.Series([None, None])
                     
     except Exception as e:
+        # Catch-all to avoid crashing the whole script on unexpected errors
         print(f"Error processing row: {e}")
         return pd.Series([None, None])
     
